@@ -13,3 +13,5 @@
 secrets.*
 credentials.*
 *.token
+
+.DS_Store

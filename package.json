@@ -6,7 +6,7 @@
   "description": "Telegram bridge that launches fresh Codex exec runs for this project.",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/codex.js && node --check src/telegram.js && node --check src/changelog.js"
+    "check": "node --check src/index.js && node --check src/codex.js && node --check src/telegram.js && node --check src/changelog.js && node --check src/config.js"
   },
   "engines": {
     "node": ">=20"

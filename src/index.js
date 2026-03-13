@@ -11,19 +11,21 @@ async function handlePrompt(text, chatId) {
   const result = await runCodex({
     userText: text,
     codexBin: config.codexBin,
-    codexModel: config.codexModel
+    codexModel: config.codexModel,
+    codexSandbox: config.codexSandbox,
+    codexAskForApproval: config.codexAskForApproval,
+    codexEphemeral: config.codexEphemeral
   });
   const reply = result.ok ? result.output : `Codex exec failed.\n\n${result.output}`;
   if (chatId) {
     await sendMessage(config.telegramToken, chatId, reply);
   }
-  return { ok: result.ok, reply };
 }
 
 function enqueuePrompt(text, chatId) {
   const run = queue.then(() => handlePrompt(text, chatId));
   queue = run.catch(() => {});
-  return run;
+  return queue;
 }
 
 function chatAllowed(chatId) {

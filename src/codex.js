@@ -56,7 +56,14 @@ async function listProjectFiles() {
     .sort();
 }
 
-export async function runCodex({ userText, codexBin, codexModel }) {
+export async function runCodex({
+  userText,
+  codexBin,
+  codexModel,
+  codexSandbox = "danger-full-access",
+  codexAskForApproval = "never",
+  codexEphemeral = false
+}) {
   await normalizeChangelog();
   const [agentsText, changelogText, relativeFiles] = await Promise.all([
     readIfPresent(AGENTS_FILE, ""),
@@ -68,17 +75,20 @@ export async function runCodex({ userText, codexBin, codexModel }) {
   const outputFile = path.join(os.tmpdir(), `codex-telegram-last-message-${Date.now()}.txt`);
   const args = [
     "--ask-for-approval",
-    "never",
+    codexAskForApproval,
     "exec",
     "--skip-git-repo-check",
-    "--ephemeral",
     "--sandbox",
-    "workspace-write",
+    codexSandbox,
     "--color",
     "never",
     "--output-last-message",
     outputFile
   ];
+
+  if (codexEphemeral) {
+    args.push("--ephemeral");
+  }
 
   if (codexModel) {
     args.push("--model", codexModel);
@@ -140,7 +150,6 @@ export async function runCodex({ userText, codexBin, codexModel }) {
 
   return {
     ok: exitCode === 0,
-    output,
-    stderr: cleanedStderr
+    output
   };
 }

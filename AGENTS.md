@@ -13,3 +13,8 @@ Core files:
 - `src/codex.js`: fresh non-interactive Codex exec wrapper.
 - `src/telegram.js`: Telegram Bot API polling and replies.
 - `src/changelog.js`: keeps `CHANGELOG.md` trimmed to the last 5 entries.
+
+Linear to-do behavior:
+- Codex uses MCP server `linear` in OAuth mode (no API key required).
+- Team scope is `MAX` unless user requests another team.
+- MCP writes depend on Codex client support for MCP elicitation in the current runtime.

@@ -34,6 +34,9 @@ export function getConfig() {
   const allowedChatId = process.env.TELEGRAM_ALLOWED_CHAT_ID;
   const codexBin = process.env.CODEX_BIN || "codex";
   const codexModel = process.env.CODEX_MODEL || "";
+  const codexSandbox = process.env.BRIDGE_CODEX_SANDBOX || "danger-full-access";
+  const codexAskForApproval = process.env.BRIDGE_CODEX_ASK_FOR_APPROVAL || "never";
+  const codexEphemeral = /^(1|true|yes)$/i.test(process.env.BRIDGE_CODEX_EPHEMERAL || "");
 
   if (!telegramToken) {
     throw new Error("Missing TELEGRAM_BOT_TOKEN");
@@ -43,6 +46,9 @@ export function getConfig() {
     telegramToken,
     allowedChatId: allowedChatId || "",
     codexBin,
-    codexModel
+    codexModel,
+    codexSandbox,
+    codexAskForApproval,
+    codexEphemeral
   };
 }
