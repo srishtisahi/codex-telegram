@@ -3,18 +3,37 @@
 This repository runs a local Telegram-to-Codex bridge for this folder.
 
 Main behavior:
-- A Telegram message launches a fresh `codex exec` run in this project root.
-- The bridge never stores or resumes Codex session ids.
-- Default Codex context comes from this file plus `CHANGELOG.md`.
+- A Telegram message is routed to the active Codex session.
+- New session creation and resuming are supported with `codex exec` + `codex exec resume`.
+- Session metadata is persisted in `sessionid.txt` (last 5 sessions).
+- Per-session compact memory is stored in `memory/sessions/<session-id>/context.md`.
+- Default Codex context comes from this file plus `CHANGELOG.md` and the active session memory file.
 - No local web UI is used; Telegram is the only chat interface.
 
 Core files:
-- `src/index.js`: app entrypoint and Telegram polling loop.
-- `src/codex.js`: fresh non-interactive Codex exec wrapper.
+- `src/index.js`: app entrypoint, Telegram polling loop, session command routing.
+- `src/codex.js`: non-interactive Codex exec/resume wrapper with thread id capture.
+- `src/session-store.js`: session persistence, compact memory summaries, prune/wipe logic.
+- `src/commands.js`: Telegram natural-language control command parsing.
 - `src/telegram.js`: Telegram Bot API polling and replies.
 - `src/changelog.js`: keeps `CHANGELOG.md` trimmed to the last 5 entries.
+- `start-bridge.sh`: starts bridge, opens per-session resume terminals, terminates tracked terminal sessions.
+
+Session behavior:
+- `/new` or “start new chat” clears active session; next prompt starts a new one.
+- `/resume <id|summary>` and `/switch <id|summary>` select a past session.
+- `/sessions` lists stored sessions.
+- `/end` ends the active session and triggers terminal termination for that session.
+- `sessionid.txt` stores `session-id | short summary` for the newest 5 sessions.
+
+Memory behavior:
+- Each user message is summarized to at most 10 words and appended to that session’s `context.md`.
+- `context.md` also keeps a compact `Projects` section inferred from user prompts.
+- “wipe previous memory” or `/wipe` clears all memory and session state.
+- “delete irrelevant parts from your memory” prunes low-signal summary entries.
+- `/wipe <text>` removes only matching summary entries (partial wipe).
 
 Linear to-do behavior:
 - Codex uses MCP server `linear` in OAuth mode (no API key required).
 - Team scope is `MAX` unless user requests another team.
-- MCP writes depend on Codex client support for MCP elicitation in the current runtime.
+- Prompt instructions enforce session-prefixed task names (e.g., `12345 - make landing page responsive`).

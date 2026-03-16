@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Telegram bridge that launches fresh Codex exec runs for this project.",
+  "description": "Telegram bridge with resumable Codex sessions and compact memory.",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/codex.js && node --check src/telegram.js && node --check src/changelog.js && node --check src/config.js"
+    "check": "node --check src/index.js && node --check src/codex.js && node --check src/telegram.js && node --check src/changelog.js && node --check src/config.js && node --check src/session-store.js && node --check src/commands.js"
   },
   "engines": {
     "node": ">=20"

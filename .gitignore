@@ -15,3 +15,7 @@ credentials.*
 *.token
 
 .DS_Store
+sessionid.txt
+memory/
+.memory-undo/
+.bridge-terminals/
