@@ -4,6 +4,8 @@ import fs from "node:fs";
 export const ROOT_DIR = process.cwd();
 export const AGENTS_FILE = path.join(ROOT_DIR, "AGENTS.md");
 export const CHANGELOG_FILE = path.join(ROOT_DIR, "CHANGELOG.md");
+export const SAFETY_GUIDE_FILE = path.join(ROOT_DIR, "SAFETY_GUIDE.md");
+export const HEARTBEAT_FILE = path.join(ROOT_DIR, "heartbeat.md");
 
 export function loadDotEnv() {
   const envPath = path.join(ROOT_DIR, ".env");
@@ -37,6 +39,7 @@ export function getConfig() {
   const codexSandbox = process.env.BRIDGE_CODEX_SANDBOX || "danger-full-access";
   const codexAskForApproval = process.env.BRIDGE_CODEX_ASK_FOR_APPROVAL || "never";
   const codexEphemeral = /^(1|true|yes)$/i.test(process.env.BRIDGE_CODEX_EPHEMERAL || "");
+  const codexBypassSandbox = /^(1|true|yes)$/i.test(process.env.BRIDGE_CODEX_BYPASS_SANDBOX || "");
 
   if (!telegramToken) {
     throw new Error("Missing TELEGRAM_BOT_TOKEN");
@@ -49,6 +52,7 @@ export function getConfig() {
     codexModel,
     codexSandbox,
     codexAskForApproval,
-    codexEphemeral
+    codexEphemeral,
+    codexBypassSandbox
   };
 }

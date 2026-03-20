@@ -2,11 +2,26 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { AGENTS_FILE, CHANGELOG_FILE, ROOT_DIR } from "./config.js";
+import { AGENTS_FILE, CHANGELOG_FILE, ROOT_DIR, SAFETY_GUIDE_FILE } from "./config.js";
 import { normalizeChangelog } from "./changelog.js";
+
+const activeChildren = new Set();
 
 function stripAnsi(value) {
   return value.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+export function cancelActiveCodexRuns() {
+  let cancelled = 0;
+  for (const child of activeChildren) {
+    try {
+      child.kill("SIGTERM");
+      cancelled += 1;
+    } catch {
+      // Ignore processes that already exited.
+    }
+  }
+  return cancelled;
 }
 
 async function readIfPresent(filePath, fallback) {
@@ -20,7 +35,17 @@ async function readIfPresent(filePath, fallback) {
   }
 }
 
-function buildPrompt({ userText, relativeFiles, agentsText, changelogText, sessionId, contextText }) {
+function buildPrompt({
+  userText,
+  relativeFiles,
+  agentsText,
+  changelogText,
+  safetyGuideText,
+  sessionId,
+  contextText,
+  modelName,
+  forceSubagents
+}) {
   const fileSummary = relativeFiles.length
     ? `Relevant project files right now:\n${relativeFiles.map((file) => `- ${file}`).join("\n")}`
     : "Relevant project files right now:\n- No files found yet.";
@@ -30,11 +55,18 @@ function buildPrompt({ userText, relativeFiles, agentsText, changelogText, sessi
     "The Telegram user is named Srishti. Always address the user as Srishti.",
     "Use this active session id for continuity:",
     sessionId,
+    `Current requested model: ${modelName || "default"}`,
     "This project uses AGENTS.md for repo behavior and CHANGELOG.md for recent context.",
-    "Read both files as project context before answering or making changes.",
+    "Read AGENTS.md, CHANGELOG.md, and SAFETY_GUIDE.md as project context before answering or making changes.",
     "If you make a meaningful project change, update CHANGELOG.md in place and keep only the last 5 entries.",
     "Each changelog entry must be extremely brief: 1-2 lines.",
     "For Linear task titles, prefix with '<session-id> - '. Example: '12345 - make landing page responsive'.",
+    "When user starts a project, create and maintain a Linear TODO list and execute tasks added by user.",
+    "Use subagents for large tasks, or whenever the user asks for subagents.",
+    `Subagent request for this task: ${forceSubagents ? "required" : "optional based on task size"}.`,
+    "If subagents are used, include this exact first line in your final answer: [SUBAGENTS] used",
+    "If no subagents are used, include this exact first line in your final answer: [SUBAGENTS] none",
+    "If close to daily Codex usage limit, include this exact first line: [LIMIT_WARNING] <short warning>",
     "Reply with a concise user-facing answer suitable for a Telegram message.",
     "Prefer compact responses unless asked for detail.",
     "",
@@ -43,6 +75,9 @@ function buildPrompt({ userText, relativeFiles, agentsText, changelogText, sessi
     "",
     "CHANGELOG.md",
     changelogText.trim() || "(empty)",
+    "",
+    "SAFETY_GUIDE.md",
+    safetyGuideText.trim() || "(empty)",
     "",
     "Session memory context (compact):",
     contextText.trim() || "(empty)",
@@ -90,12 +125,15 @@ export async function runCodex({
   codexSandbox = "danger-full-access",
   codexAskForApproval = "never",
   codexEphemeral = false,
-  contextText = ""
+  codexBypassSandbox = false,
+  contextText = "",
+  forceSubagents = false
 }) {
   await normalizeChangelog();
-  const [agentsText, changelogText, relativeFiles] = await Promise.all([
+  const [agentsText, changelogText, safetyGuideText, relativeFiles] = await Promise.all([
     readIfPresent(AGENTS_FILE, ""),
     readIfPresent(CHANGELOG_FILE, ""),
+    readIfPresent(SAFETY_GUIDE_FILE, ""),
     listProjectFiles()
   ]);
 
@@ -104,8 +142,11 @@ export async function runCodex({
     relativeFiles,
     agentsText,
     changelogText,
+    safetyGuideText,
     sessionId: sessionId || "(pending)",
-    contextText
+    contextText,
+    modelName: codexModel,
+    forceSubagents
   });
 
   const outputFile = path.join(os.tmpdir(), `codex-telegram-last-message-${Date.now()}.txt`);
@@ -114,6 +155,9 @@ export async function runCodex({
     codexAskForApproval,
     "exec"
   ];
+  if (codexBypassSandbox) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  }
 
   if (!createNewSession) {
     args.push("resume", "--json", "--output-last-message", outputFile);
@@ -152,6 +196,7 @@ export async function runCodex({
     },
     stdio: ["pipe", "pipe", "pipe"]
   });
+  activeChildren.add(child);
 
   let stdout = "";
   let stderr = "";
@@ -167,10 +212,15 @@ export async function runCodex({
   child.stdin.write(prompt);
   child.stdin.end();
 
-  const exitCode = await new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
+  let exitCode = 1;
+  try {
+    exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", resolve);
+    });
+  } finally {
+    activeChildren.delete(child);
+  }
 
   await normalizeChangelog();
 
@@ -200,6 +250,8 @@ export async function runCodex({
   return {
     ok: exitCode === 0,
     output,
-    threadId
+    threadId,
+    stderr: cleanedStderr,
+    stdout: cleanedStdout
   };
 }
