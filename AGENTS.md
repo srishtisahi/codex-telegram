@@ -36,4 +36,8 @@ Memory behavior:
 Linear to-do behavior:
 - Codex uses MCP server `linear` in OAuth mode (no API key required).
 - Team scope is `MAX` unless user requests another team.
-- Prompt instructions enforce session-prefixed task names (e.g., `12345 - make landing page responsive`).
+- Before execution, Codex adds planned tasks to Linear, then executes one-by-one with in-progress updates.
+- If scope changes mid-execution, Codex adds follow-up tasks and continues progress tracking.
+- Codex creates/reuses a Linear project with a title of at most 5 words.
+- The Linear project short summary stores the session id for reference.
+- Linear task names are written normally (no session-id prefix in each task title).

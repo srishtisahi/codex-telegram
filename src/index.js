@@ -44,6 +44,7 @@ let activePrimaryPromptText = "";
 const heartbeat = {
   active: false,
   awaitingConfirmation: null,
+  pendingStart: null,
   chatId: "",
   startedAt: 0,
   stopAt: 0,
@@ -62,6 +63,17 @@ const heartbeat = {
   lastWorkSummary: "",
   lastWorkAt: 0
 };
+
+const HEARTBEAT_BASE_CONTENT = [
+  "# Heartbeat",
+  "",
+  "Tracks heartbeat lifecycle for long-running Telegram-driven tasks.",
+  "",
+  "- This file is append-only during runtime.",
+  "- Entries use ISO timestamp format.",
+  "- Pings are logged every 5 minutes while heartbeat is active.",
+  ""
+].join("\n");
 
 function shortSummary(text) {
   const words = String(text || "").trim().split(/\s+/).filter(Boolean);
@@ -157,6 +169,25 @@ function shouldForkParallelWhileBusy(text) {
   return questionLike && overlap < 0.08;
 }
 
+function hasPrimaryWorkInFlightOrQueued() {
+  if (isProcessing && activePrimaryPromptText.trim()) {
+    return true;
+  }
+  return queuedPrompts.some((item) => !item?.options?.fromHeartbeat);
+}
+
+function isImmediateControlCommand(commandType) {
+  return [
+    "heartbeat_start",
+    "heartbeat_confirm",
+    "heartbeat_stop",
+    "heartbeat_wipe_all",
+    "heartbeat_wipe_query",
+    "heartbeat_status_prefs",
+    "health"
+  ].includes(commandType);
+}
+
 function buildHeartbeatTaskPrompt(taskText, runIndex, minsLeft) {
   const phase = runIndex === 0 ? "initial" : "continuation";
   return [
@@ -174,16 +205,58 @@ async function appendHeartbeatEvent(message) {
   try {
     await fs.appendFile(HEARTBEAT_FILE, entry, "utf8");
   } catch {
-    const initial = [
-      "# Heartbeat",
-      "",
-      "Tracks background heartbeat pings for long-running Telegram requests.",
-      "",
-      entry.trimEnd(),
-      ""
-    ].join("\n");
+    const initial = `${HEARTBEAT_BASE_CONTENT}${entry}`;
     await fs.writeFile(HEARTBEAT_FILE, initial, "utf8");
   }
+}
+
+function isHeartbeatEventLine(line) {
+  return /^\s*-\s+\d{4}-\d{2}-\d{2}T/.test(String(line || ""));
+}
+
+async function readHeartbeatRaw() {
+  try {
+    return await fs.readFile(HEARTBEAT_FILE, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+async function wipeHeartbeatAll() {
+  const raw = await readHeartbeatRaw();
+  const removed = raw
+    .split(/\r?\n/)
+    .filter((line) => isHeartbeatEventLine(line))
+    .length;
+  await fs.writeFile(HEARTBEAT_FILE, HEARTBEAT_BASE_CONTENT, "utf8");
+  return { removed };
+}
+
+async function wipeHeartbeatQuery(query) {
+  const raw = await readHeartbeatRaw();
+  if (!raw.trim()) {
+    return { removed: 0 };
+  }
+  const lines = raw.split(/\r?\n/);
+  const needle = query.toLowerCase();
+  let removed = 0;
+  const kept = lines.filter((line) => {
+    if (!isHeartbeatEventLine(line)) {
+      return true;
+    }
+    if (line.toLowerCase().includes(needle)) {
+      removed += 1;
+      return false;
+    }
+    return true;
+  });
+
+  const next = `${kept.join("\n").replace(/\n+$/g, "")}\n`;
+  await fs.writeFile(HEARTBEAT_FILE, next, "utf8");
+  return { removed };
 }
 
 function clearHeartbeatTimers() {
@@ -411,6 +484,8 @@ async function handleControlCommand(command, text, chatId) {
     const cancelled = cancelActiveCodexRuns();
     queuedPrompts.length = 0;
     latestInterruptPrompt = null;
+    heartbeat.awaitingConfirmation = null;
+    heartbeat.pendingStart = null;
     if (heartbeat.active) {
       await stopHeartbeat("stopped by user", false, chatId);
     }
@@ -426,6 +501,8 @@ async function handleControlCommand(command, text, chatId) {
     const cancelled = cancelActiveCodexRuns();
     queuedPrompts.length = 0;
     latestInterruptPrompt = null;
+    heartbeat.awaitingConfirmation = null;
+    heartbeat.pendingStart = null;
     if (heartbeat.active) {
       await stopHeartbeat("ended all sessions", false, chatId);
     }
@@ -447,6 +524,8 @@ async function handleControlCommand(command, text, chatId) {
     const cancelled = cancelActiveCodexRuns();
     queuedPrompts.length = 0;
     latestInterruptPrompt = null;
+    heartbeat.awaitingConfirmation = null;
+    heartbeat.pendingStart = null;
     if (heartbeat.active) {
       await stopHeartbeat("ended other sessions", false, chatId);
     }
@@ -532,6 +611,23 @@ async function handleControlCommand(command, text, chatId) {
   }
 
   if (command.type === "heartbeat_start") {
+    if (heartbeat.awaitingConfirmation && /^\/heartbeat\s*$/i.test(String(text || "").trim())) {
+      const pending = heartbeat.awaitingConfirmation;
+      await sendMessage(
+        config.telegramToken,
+        chatId,
+        `Heartbeat start is already pending for ${pending.durationMinutes}m. Reply /heartbeat confirm.`
+      );
+      return true;
+    }
+
+    const contextTaskText = String(command.contextTaskText || "").trim();
+    if (contextTaskText) {
+      enqueuePrompt(contextTaskText, chatId, { silentQueueNote: true }).catch((error) => {
+        console.error(error);
+      });
+    }
+
     heartbeat.awaitingConfirmation = {
       chatId,
       durationMinutes: Math.max(1, Number.parseInt(command.durationMinutes, 10) || 30),
@@ -555,18 +651,55 @@ async function handleControlCommand(command, text, chatId) {
     }
     const pending = heartbeat.awaitingConfirmation;
     heartbeat.awaitingConfirmation = null;
+    if (!hasPrimaryWorkInFlightOrQueued()) {
+      heartbeat.pendingStart = pending;
+      await sendMessage(
+        config.telegramToken,
+        chatId,
+        `Heartbeat armed for ${pending.durationMinutes}m. It will start automatically when the next project task starts.`
+      );
+      return true;
+    }
+
     await startHeartbeat({
       chatId: pending.chatId,
       durationMinutes: pending.durationMinutes,
       statusEveryMinutes: pending.statusEveryMinutes,
       statusMode: pending.statusMode,
-      taskText: pending.taskText
+      taskText: pending.taskText || activePrimaryPromptText
     });
     return true;
   }
 
   if (command.type === "heartbeat_stop") {
+    heartbeat.awaitingConfirmation = null;
+    if (heartbeat.pendingStart) {
+      heartbeat.pendingStart = null;
+      await sendMessage(config.telegramToken, chatId, "Cancelled pending heartbeat start.");
+      return true;
+    }
+    if (!heartbeat.active) {
+      await sendMessage(config.telegramToken, chatId, "No active heartbeat right now.");
+      return true;
+    }
     await stopHeartbeat("manually terminated", true, chatId);
+    return true;
+  }
+
+  if (command.type === "heartbeat_wipe_all") {
+    const res = await wipeHeartbeatAll();
+    await sendMessage(config.telegramToken, chatId, `Heartbeat log wiped. Removed ${res.removed} event(s).`);
+    return true;
+  }
+
+  if (command.type === "heartbeat_wipe_query") {
+    const query = String(command.query || "").trim();
+    if (!query) {
+      await sendMessage(config.telegramToken, chatId, "Provide text to remove. Example: /heartbeat wipe STOP");
+      return true;
+    }
+    const res = await wipeHeartbeatQuery(query);
+    await sendMessage(config.telegramToken, chatId, `Heartbeat entries matching '${query}' removed: ${res.removed}.`);
     return true;
   }
 
@@ -776,6 +909,17 @@ async function processNextPrompt() {
   try {
     if (!next?.options?.fromHeartbeat) {
       activePrimaryPromptText = String(next.text || "");
+      if (heartbeat.pendingStart && !heartbeat.active) {
+        const pending = heartbeat.pendingStart;
+        heartbeat.pendingStart = null;
+        await startHeartbeat({
+          chatId: pending.chatId || next.chatId,
+          durationMinutes: pending.durationMinutes,
+          statusEveryMinutes: pending.statusEveryMinutes,
+          statusMode: pending.statusMode,
+          taskText: pending.taskText || activePrimaryPromptText
+        });
+      }
     }
     await handlePrompt(next.text, next.chatId, next.options || {});
   } catch (error) {
@@ -866,7 +1010,7 @@ async function startTelegramLoop() {
           await sendMessage(
             config.telegramToken,
             chatId,
-            "Hi Srishti. I am max codestappen. Commands: /new, /sessions, /switch <id>, /resume <id|summary>, /models, /heartbeat, /health, /end, /end all, /wipe, /undo"
+            "Hi Srishti. I am max codestappen. Commands: /new, /sessions, /switch <id>, /resume <id|summary>, /models, /heartbeat, /heartbeat wipe, /health, /end, /end all, /wipe, /undo"
           );
           continue;
         }
@@ -878,8 +1022,11 @@ async function startTelegramLoop() {
 
         await sendMessage(config.telegramToken, chatId, Math.random() < 0.5 ? "working" : "thinking");
 
-        if (heartbeat.active) {
-          await stopHeartbeat("new Telegram message received", true, chatId);
+        const command = parseControlCommand(text);
+        if (isImmediateControlCommand(command.type)) {
+          if (await handleControlCommand(command, text, chatId)) {
+            continue;
+          }
         }
 
         enqueuePrompt(text, chatId).catch((error) => {

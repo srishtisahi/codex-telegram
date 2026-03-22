@@ -49,11 +49,25 @@ function parseStatusCadence(text) {
   if (/\bone\s+at\s+the\s+end\b/.test(lower) || /\bonly\s+.*\bend\b/.test(lower)) {
     return { statusMode: "end", statusEveryMinutes: 0 };
   }
-  const m = lower.match(/status(?:\s+update)?s?.*?(?:every|each)\s+(\d+)\s*(?:minutes?|mins?|m)\b/);
-  if (m) {
+  const explicit = lower.match(/(?:status|update|progress)(?:\s+update)?s?.*?(?:every|each)\s+(\d+)\s*(?:minutes?|mins?|m)\b/);
+  if (explicit) {
     return {
       statusMode: "periodic",
-      statusEveryMinutes: Number.parseInt(m[1], 10)
+      statusEveryMinutes: Number.parseInt(explicit[1], 10)
+    };
+  }
+  const shorthand = lower.match(/\b(?:every|each)\s+(\d+)\s*(?:minutes?|mins?|m)\s+(?:updates?|status|progress)\b/);
+  if (shorthand) {
+    return {
+      statusMode: "periodic",
+      statusEveryMinutes: Number.parseInt(shorthand[1], 10)
+    };
+  }
+  const withUpdates = lower.match(/\bwith\s+(\d+)\s*(?:minutes?|mins?|m)\s+(?:updates?|status|progress)\b/);
+  if (withUpdates) {
+    return {
+      statusMode: "periodic",
+      statusEveryMinutes: Number.parseInt(withUpdates[1], 10)
     };
   }
   return null;
@@ -79,6 +93,18 @@ function parseHeartbeatTask(text) {
   }
 
   return "";
+}
+
+function parseTextBeforeHeartbeat(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const idx = raw.search(/\bstart heartbeat\b/i);
+  if (idx <= 0) {
+    return "";
+  }
+  return raw.slice(0, idx).trim().replace(/[,\s]+$/, "");
 }
 
 export function parseControlCommand(rawText) {
@@ -163,6 +189,21 @@ export function parseControlCommand(rawText) {
     return { type: "health" };
   }
 
+  if (lower.startsWith("/heartbeat wipe")) {
+    const query = extractArgument(text, /^\/heartbeat\s+wipe\s+(.+)$/i);
+    if (!query || /^(?:all|sessions?|log|logs?)$/i.test(query)) {
+      return { type: "heartbeat_wipe_all" };
+    }
+    return { type: "heartbeat_wipe_query", query };
+  }
+
+  if (
+    (lower.includes("wipe heartbeat") || lower.includes("clear heartbeat") || lower.includes("delete heartbeat log")) &&
+    !lower.includes("start heartbeat")
+  ) {
+    return { type: "heartbeat_wipe_all" };
+  }
+
   if (lower === "/heartbeat confirm") {
     return { type: "heartbeat_confirm" };
   }
@@ -195,7 +236,8 @@ export function parseControlCommand(rawText) {
       durationMinutes,
       statusEveryMinutes: cadence?.statusEveryMinutes ?? 10,
       statusMode: cadence?.statusMode || "periodic",
-      taskText: parseHeartbeatTask(text)
+      taskText: parseHeartbeatTask(text),
+      contextTaskText: parseTextBeforeHeartbeat(text)
     };
   }
 

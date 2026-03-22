@@ -42,5 +42,9 @@ Treat these as actionable execution requests. Execute with the safety rules abov
 
 ## Linear To-Do Discipline
 - When a new project starts, create or update a Linear to-do list in team `MAX` unless another team is requested.
-- Keep task titles prefixed with `<session-id> - `.
+- Create or reuse one Linear project with a title of at most 5 words.
+- Store the active session id in the Linear project short summary for reference.
+- Add planned tasks before starting execution, then execute tasks one by one.
+- Update task status/progress during execution and add follow-up tasks when scope changes.
+- Keep task titles normal (no session-id prefix in each task title).
 - Continue and execute existing user-assigned tasks where possible.

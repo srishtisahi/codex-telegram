@@ -19,3 +19,5 @@ sessionid.txt
 memory/
 .memory-undo/
 .bridge-terminals/
+
+heartbeat.md
