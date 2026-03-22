@@ -112,6 +112,16 @@ function parseThreadIdFromJsonl(stdoutText) {
   return "";
 }
 
+function isUnsupportedModelError(text) {
+  const lower = String(text || "").toLowerCase();
+  return (
+    lower.includes("model is not supported") ||
+    lower.includes("not supported when using codex with a chatgpt account") ||
+    lower.includes("unsupported model") ||
+    lower.includes("model is unavailable")
+  );
+}
+
 async function listProjectFiles() {
   const entries = await fs.readdir(ROOT_DIR, { withFileTypes: true });
   return entries
@@ -245,10 +255,15 @@ export async function runCodex({
   const threadId = parseThreadIdFromJsonl(cleanedStdout) || sessionId || "";
   let output = lastMessage || cleanedStderr || "Codex returned no output.";
 
-  if (!lastMessage && cleanedStderr.includes("model is not supported when using Codex with a ChatGPT account")) {
+  if (!lastMessage && isUnsupportedModelError(`${cleanedStderr}\n${cleanedStdout}`)) {
     output = [
       "The configured Codex model is not supported on this account.",
       "Set `CODEX_MODEL=\"\"` in `.env`, restart `./start-bridge.sh`, and try again."
+    ].join("\n");
+  } else if (!lastMessage && cleanedStderr.includes("no last agent message") && codexModel) {
+    output = [
+      `Codex returned no message while using model '${codexModel}'.`,
+      "This is often a model/account compatibility issue. Try `/models set gpt-5.3-codex`."
     ].join("\n");
   }
 

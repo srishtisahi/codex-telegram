@@ -754,8 +754,26 @@ async function handleControlCommand(command, text, chatId) {
   }
 
   if (command.type === "wipe_memory_all") {
+    const cancelled = cancelActiveCodexRuns();
+    queuedPrompts.length = 0;
+    latestInterruptPrompt = null;
+    heartbeat.awaitingConfirmation = null;
+    heartbeat.pendingStart = null;
+    if (heartbeat.active) {
+      await stopHeartbeat("memory/session wipe", false, chatId);
+    }
+    const sessions = await listSessions();
+    for (const s of sessions) {
+      await endSession(s.id);
+      await terminateSessionTerminal(s.id);
+    }
     await pruneMemory({ mode: "all" });
-    await sendMessage(config.telegramToken, chatId, "Memory wiped: all saved session memory removed.");
+    await setActiveSession("");
+    await sendMessage(
+      config.telegramToken,
+      chatId,
+      `Wiped all sessions and memory. Ended ${sessions.length} session(s) and cancelled ${cancelled} active run(s).`
+    );
     return true;
   }
 

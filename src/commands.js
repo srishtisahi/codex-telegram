@@ -308,7 +308,12 @@ export function parseControlCommand(rawText) {
     lower.includes("wipe previous memory") ||
     lower === "/wipe" ||
     lower === "/wipe all" ||
-    lower.includes("wipe memory")
+    lower.includes("wipe memory") ||
+    (
+      /\b(?:wipe|clear|delete|reset)\b/.test(lowerClean) &&
+      /\bsessions?\b/.test(lowerClean) &&
+      /\bmemory\b/.test(lowerClean)
+    )
   ) {
     return { type: "wipe_memory_all" };
   }
